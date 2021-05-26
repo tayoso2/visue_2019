@@ -1,0 +1,10 @@
+*.rhistory
+*.csv
+*.xlsx
+*.pptx
+
+!/scripts
+
+
+!*.r
+!*.rmd
