@@ -1,7 +1,6 @@
-# exclude everything except directory foo/bar
+# exclude everything except directory r and rmd scripts
 
-!/scripts
-!/Model/scripts
+!**/scripts
 
 *.rhistory
 *.rdata
