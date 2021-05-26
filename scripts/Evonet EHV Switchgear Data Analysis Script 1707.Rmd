@@ -1,0 +1,868 @@
+---
+title: "Evonet EHV Switchgear Data Analysis"
+output:
+  html_document:
+    number_sections: yes
+    theme: yeti
+    toc: yes
+    toc_float: yes
+---
+---
+  
+```{r headers, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+#BeginHeader
+#Input#DataTable#Name:EHV Switchgear Asset Base#Description:EHV Switchgear raw asset data.
+#Output#DataTable#Name:EHV Switchgear Population Summary#Description:Summary of population for each field of the data.
+#Output#DataTable#Name:EHV Switchgear#Description:EHV Switchgear asset base for the model.
+#Output#DataTable#Name:EHV Switchgear GIS#Description:EHV Switchgear GIS.
+#EndHeader
+
+
+#rm(list = ls())
+
+EDA <- F# set to TRUE if running in EDA data labs
+
+if (EDA) {
+  args <- commandArgs(trailingOnly = TRUE)
+} else {
+  args <- c(getwd(),
+            "Data/Asset Bases/EHV Switchgear_Raw Assets v2 (EDA Version v1) 1707.csv",
+            "Output Data/EHV Switchgear Population Summary 1707.csv",
+            "Output Data/EHV Switchgear For Model 1707.csv", 
+            "Output Data/EHV Switchgear GIS 1707.csv")
+}
+
+setwd(args[1])
+```
+
+
+```{r load.data, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(DescTools)
+library(knitr)
+library(stringi)
+library(sf)
+library(stringr)
+library(kableExtra)
+
+sg.assets <- data.table(read_csv(args[2], locale=locale(encoding="Latin1")))
+
+## remove any completely empty rows and make asset id unique throughout
+sg.assets <- sg.assets[!apply(is.na(sg.assets) | sg.assets == "", 1, all),]
+sg.assets$Asset_Number <- make.unique(as.character(sg.assets$Asset_Number))
+
+# calculate average year of manufacture (excluding 0, NA & default values)
+sg.assets.copy <- sg.assets
+sg.assets.copy$Year_Of_Manufacture[sg.assets.copy$Year_Of_Manufacture==0] <- NA
+average.year <- round(mean(as.numeric(sg.assets.copy$Year_Of_Manufacture), na.rm=T))
+
+# calculate average number of customers (excluding 0, NA & default values)
+sg.assets.copy$Number_Of_Customers[sg.assets.copy$Number_Of_Customers==0] <- NA
+average.customers <- round(mean(as.numeric(sg.assets.copy$Number_Of_Customers), na.rm=T))
+
+##Strip out danish characters to limit problems.
+#ae
+sg.assets <- sg.assets[, lapply(.SD,   function(x){gsub("Æ", "AE", gsub("æ", "ae", x))}),  .SDcols = 1:ncol(sg.assets)]
+names(sg.assets) <- gsub("Æ", "AE", gsub("æ", "ae", names(sg.assets)))
+
+#aa
+sg.assets <- sg.assets[, lapply(.SD,   function(x){gsub("Å", "AA", gsub("å", "aa", x))}),  .SDcols = 1:ncol(sg.assets)]
+names(sg.assets) <- gsub("Å", "AA", gsub("å", "aa", names(sg.assets)))
+
+#oe
+sg.assets <- sg.assets[, lapply(.SD,   function(x){gsub("Ø", "OE", gsub("ø", "oe", x))}),  .SDcols = 1:ncol(sg.assets)]
+names(sg.assets) <- gsub("Ø", "OE", gsub("ø", "oe", names(sg.assets)))
+
+sg.assets <- as.tibble(sg.assets)
+```
+
+# **Asset Quantity**
+
+There are **`r nrow(sg.assets)`** records for EHV Switchgear in the source data. Ignoring NA or default values:
+
+* The average year of manufacture is **`r average.year`**.
+
+* The average number of customers is **`r average.customers`.**
+
+---
+
+# **Population Summary**
+
+An entry is deemed as unpopulated if it is either NA or blank. The chart below shows the fields provided in each source data item and indicates how populated each field is:
+
+```{r warning=FALSE, echo=FALSE, message = FALSE, fig.height = 18}
+sg.assets[sg.assets == ""] <-  NA
+Unpopulated <- apply(sg.assets, 2, function(x) (mean(is.na(x)))*100)
+Default <- apply(sg.assets, 2, function(x) (mean(x == "Default"))*100)
+Default <- ifelse(is.na(Default), 0, Default)
+Populated <- 100 - Unpopulated - Default
+Field <- names(Unpopulated)
+data.pop <- data.frame(Field, Unpopulated, Populated, Default)
+data.pop <- gather(data.pop, variable, value, -Field) %>%
+  mutate(variable = factor(variable, levels = c("Unpopulated", "Populated", "Default"), ordered = TRUE)) 
+
+write_csv(data.pop, args[3])
+
+ggplot(data = data.pop, aes(x = Field, y = value, fill = variable)) + 
+    geom_bar(stat = "identity") + coord_flip() +
+  labs(title="Percentage Population in the Switchgear Data", y="Percentage", fill="Population Levels")
+```
+
+```{r GIS, message=FALSE, warning=FALSE, echo=FALSE}
+
+
+# Function to make Qlik map line format from WKT geometry -----------------
+
+
+QlikLineFormat <- function(wkt) {
+ # Converts WKT (well-known text) line geometry to the format required by Qlik
+ #
+ # Args:
+ #   wkt: Character vector of 2d line geometry in WKT format
+ #
+ # Returns:
+ #   A character vector of same length as wkt containing line geometry in format
+ #   which can be visualised by Qlik.
+  
+  # Remove unrequired text from wkt
+  qlik.line <- str_replace(wkt, "POINT ", "")
+  qlik.line <- str_replace(qlik.line, "\\(", "")
+  qlik.line <- str_replace(qlik.line, "\\)", "")
+  # Split into list based on comma seperated values
+  qlik.line <- str_split(qlik.line, ",")
+  
+  # Inner function to add markup to each item in the list
+  sq.brackets <- function(x) {
+    x <- str_replace(x, "^ ", "")
+    x <- str_replace(x, " ", ",")
+    x <- paste0("[", x, "]")
+    x <- str_flatten(x, collapse = ",")
+  }
+  
+  # Apply Qlik markup to wkt
+  qlik.line <- lapply(qlik.line, sq.brackets)
+  # Convert list to vector
+  qlik.line <- unlist(qlik.line)
+  
+  return(qlik.line)
+}
+
+str_flatten <- function(string, collapse = "") {
+  stri_flatten(string, collapse = collapse)
+}
+
+```
+
+
+
+## Asset ID
+
+Asset_Number is the unique identifier. There is a total of **`r length(sg.assets$Asset_Number)`** rows in the switchgear source data. There are **`r length(unique(sg.assets$Asset_Number))`** unique values for Asset_Number.
+
+## Corrosion
+
+```{r sg corrosion, message=FALSE, warning=FALSE, echo=FALSE}
+ggplot(sg.assets, aes(factor(Corrosion_Index))) +
+  geom_bar() +
+  labs(title="Count of EHV Switchgear by Corrosion Category", y="Count", x="Corrosion Index")
+
+```
+
+## Distance from Coast
+
+```{r sg dist.from.coast, message=FALSE, warning=FALSE, echo=FALSE}
+PlotFdist(as.numeric(sg.assets$Distance_From_Coast), na.rm = TRUE,
+          main = "Distribution of EHV Switchgear by Distance from Coast")
+```
+
+## Indoor/Outdoor
+
+```{r sg indoor.outdoor, message=FALSE, warning=FALSE, echo=FALSE}
+ggplot(sg.assets, aes(Position)) +
+  geom_bar() +
+  labs(title="Count of EHV Switchgear by Indoor/Outdoor (OD=Outdoor, ID=Indoor)", y="Count", x="Position")
+```
+
+## Year Of Manufacture
+
+```{r sg age, message=FALSE, warning=FALSE, echo=FALSE}
+sg.assets$Year_Of_Manufacture <- as.numeric(sg.assets$Year_Of_Manufacture)
+PlotFdist(sg.assets$Year_Of_Manufacture, na.rm = TRUE,
+          main = "Distribution of EHV Switchgear by Year of Manufacture")
+```
+
+## External Condition
+
+```{r ext cond, message=FALSE, warning=FALSE, echo=FALSE}
+ggplot(sg.assets, aes(`External Condition Factor`)) +
+  geom_bar() +
+  labs(title="Count of EHV Switchgear by External Condition", y="Count", x="External Condition")
+```
+
+---
+
+# **Creation of Model Asset Base**
+
+```{r model, warning=FALSE, echo=FALSE, message = FALSE}
+assets <- sg.assets
+
+raw.model.data <- data.frame(Area1 = "Evonet",
+                          Type = "Switchgear",
+                          Asset_Number = assets$Asset_Number,
+                          Manufacturer = assets$Manufacturer,
+                          Relation_3 = assets$Relation_3,
+                          Code = assets$DRFTMRK,
+                          Evonet_Group = "60kV Station",
+                          Health_Index_Asset_Category = assets$Health_Index_Asset_Category,
+                          Asset_Register_Category = assets$Asset_Register_Category,
+                          SubDivision = ifelse(assets$Position=="ID", "Air Insulated and Indoor", ifelse(assets$Position=="OD", "Air Insulated and Outdoor", "Default")),
+                          Voltage = gsub("\\s(.*)", "", assets$Asset_Register_Category),
+                          Year_Of_Manufacture = assets$Year_Of_Manufacture,
+                          Coast_Side = assets$Coast_Side,
+                          Altitude = "Default",
+                          Corrosion_Index = assets$Corrosion_Index,
+                          Distance_From_Coast = assets$Distance_From_Coast,
+                          Position = assets$Position,
+                          Duty_Factor = assets$Duty_Factor,
+                          Number_Of_Customers = assets$Number_Of_Customers,
+                          Top_30_Customers_Factor = assets$Top_30_Customers_Factor,
+                          Type_Factor = assets$Type_Factor,
+                          Access_Financial_Factor = assets$Access_Financial_Factor,
+                          Location_Safety_Factor = assets$Location_Safety_Factor,
+                          Type_Safety_Factor = assets$Type_Safety_Factor,
+                          Type_Environmental_Factor = assets$Type_Environmental_Factor,
+                          Proximity_to_Water_Course = assets$Proximity,
+                          Bunding_Factor = assets$Bunding_Factor,
+                          Actual_Load = assets$Maximum_Demand,
+                          Network_Type_Factor = assets$Network_Type_Factor,
+                          `Quantity Resource` = assets$`Quantity Resource`,
+                          `External Condition Factor` = assets$`External Condition Factor`,
+                          `Oil Leaks_Gas Pressure Factor` = assets$`Oil Leaks_Gas Pressure Factor`,
+                          `Thermographic Assessment Factor` = assets$`Thermographic Assessment Factor`,
+                          `Internal Condition Factor` = assets$`Internal Condition Factor`,
+                          `Indoor Environment Condition Factor` = assets$`Indoor Environment Condition Factor`,
+                          `Support Structures Condition Factor` = assets$`Support Structures Condition Factor`,
+                          `Partial Discharge Factor` = assets$`Partial Discharge Factor`,
+                          `Ductor Test Factor` = assets$`Ductor Test Factor`,
+                          `IR Test Factor` = assets$`IR Test Factor`,
+                          `Oil Tests_Gas Tests Factor` = assets$`Oil Tests_Gas Tests Factor`,
+                          `Temperature Readings Factor` = assets$`Temperature Readings Factor`,
+                          `Trip Test Factor` = assets$`Trip Test Factor`,
+                          `Reliability Modifier` = assets$`Reliability Modifier`,	
+                          `Reliability Collar` = assets$`Reliability Collar`,
+check.names = F, stringsAsFactors = F)
+                          
+table.data <- data.frame(`Model Field Name` = colnames(raw.model.data),
+                         `Data Used` = c("'Evonet' for all assets",
+                                         "'Transformer' for all assets",
+                                         "Asset_Number",
+                                         "Manufacturer",
+                                         "Relation_3",
+                                         "DRFTMRK",
+                                         "60kV Station",
+                                         "Health_Index_Asset_Category",
+                                         "Asset_Register_Category",
+                                         "Banded using Position",
+                                         "First word of the Asset_Register_Category",
+                                         "Year_Of_Manufacture",
+                                         "Coast_Side",
+                                         "'Default' for all assets",
+                                         "Corrosion_Index",
+                                         "Distance_From_Coast",
+                                         "Position",
+                                         "Duty_Factor",
+                                         "Number_Of_Customers",
+                                         "Top_30_Customers_Factor",
+                                         "Type_Factor",
+                                         "Access_Financial_Factor",
+                                         "Location_Safety_Factor",
+                                         "Type_Safety_Factor",
+                                         "Type_Environmental_Factor",
+                                         "Proximity",
+                                         "Bunding_Factor",
+                                         "Maximum_Demand",
+                                         "Network_Type_Factor",
+                                         "Quantity Resource",
+                                         "External Condition Factor",
+                                         "Oil Leaks_Gas Pressure Factor",
+                                         "Thermographic Assessment Factor",
+                                         "Internal Condition Factor",
+                                         "Indoor Environment Condition Factor",
+                                         "Support Structures Condition Factor",
+                                         "Partial Discharge Factor",
+                                         "Ductor Test Factor",
+                                         "IR Test Factor",
+                                         "Oil Tests_Gas Tests Factor",
+                                         "Temperature Readings Factor",
+                                         "Trip Test Factor",
+                                         "Reliability Modifier",	
+                                         "Reliability Collar"), check.names = F)
+
+kable(table.data, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"))
+
+model.data <- raw.model.data
+```
+
+```{r manufacturer infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+manufacturer.default <- sum(is.na(model.data$Manufacturer))
+
+model.data$Manufacturer <- ifelse(!is.na(model.data$Manufacturer),
+                                    model.data$Manufacturer,
+                                    model.default)
+```
+
+```{r relation infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+relation.default <- sum(is.na(model.data$Relation_3))
+
+model.data$Relation_3 <- ifelse(!is.na(model.data$Relation_3),
+                                  model.data$Relation_3,
+                                  model.default)
+```
+
+```{r code infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+code.default <- sum(is.na(model.data$Code))
+
+model.data$Code <- ifelse(!is.na(model.data$Code),
+                                  model.data$Code,
+                                  model.default)
+```
+
+```{r health category infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- "EHV Switchgear"
+model.default <- "EHV Switchgear"
+
+health.category.default <- sum(!(model.data$Health_Index_Asset_Category %in% model.accepts))
+
+model.data$Health_Index_Asset_Category <- ifelse(model.data$Health_Index_Asset_Category %in% model.accepts,
+                                    model.data$Health_Index_Asset_Category,
+                                    model.default)
+```
+
+```{r asset category infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("60kV CB (Air Insulated Busbars) (OD) (GM)", "60kV CB (Air Insulated Busbars) (ID) (GM)")
+model.default <- "60kV CB (Air Insulated Busbars) (OD) (GM)"
+
+asset.category.default <- sum(!(model.data$Asset_Register_Category %in% model.accepts))
+
+model.data$Asset_Register_Category <- ifelse(model.data$Asset_Register_Category %in% model.accepts,
+                                    model.data$Asset_Register_Category,
+                                    model.default)
+```
+
+```{r voltage infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <-"60kV"
+model.default <- "60kV"
+
+voltage.default <- sum(!(model.data$Voltage %in% model.accepts))
+
+model.data$Voltage <- ifelse(model.data$Voltage %in% model.accepts,
+                                    model.data$Voltage,
+                                    model.default)
+```
+
+```{r coast infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("East", "West")
+model.default <- "Default"
+
+coast.default <- sum(!(model.data$Coast_Side %in% model.accepts))
+
+model.data$Coast_Side <- ifelse(!is.na(model.data$Coast_Side),
+                                    model.data$Coast_Side,
+                                    model.default)
+```
+
+```{r year infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default" # model cannot run with this! Will need a default - done below
+
+model.data$Year_Of_Manufacture <- as.numeric(model.data$Year_Of_Manufacture)
+
+model.data$Year_Of_Manufacture[model.data$Year_Of_Manufacture==0] <- NA
+year.default <- sum(is.na(as.numeric(model.data$Year_Of_Manufacture)))
+
+# change NA year values to average across asset base; 0 is used as a default value, so change this to NA
+model.data$Year_Of_Manufacture[is.na(model.data$Year_Of_Manufacture)] <- round(mean(model.data$Year_Of_Manufacture, na.rm=T))
+
+model.data$Year_Of_Manufacture <- ifelse(!is.na(as.numeric(model.data$Year_Of_Manufacture)),
+                                    model.data$Year_Of_Manufacture,
+                                    model.default)
+```
+
+```{r subdivision infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("Air Insulated and Outdoor", "Air Insulated and Indoor")
+model.default <- "Air Insulated and Outdoor"
+
+subdivision.default <- sum(!(model.data$SubDivision %in% model.accepts))
+
+model.data$SubDivision <- ifelse(model.data$SubDivision %in% model.accepts,
+                                    model.data$SubDivision,
+                                    model.default)
+```
+
+```{r altitude infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+altitude.default <- sum(is.na(as.numeric(model.data$Altitude)) | model.data$Altitude=="Default")
+
+model.data$Altitude <- ifelse(!is.na(as.numeric(model.data$Altitude)),
+                                    model.data$Altitude,
+                                    model.default)
+```
+
+```{r corrosion infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- 1:5
+model.default <- "Default"
+
+corrosion.default <- sum(!(model.data$Corrosion_Index %in% model.accepts))
+
+model.data$Corrosion_Index <- ifelse(model.data$Corrosion_Index %in% model.accepts,
+                                    model.data$Corrosion_Index,
+                                    model.default)
+```
+
+```{r distance infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+distance.default <- sum(is.na(as.numeric(model.data$Distance_From_Coast)))
+
+model.data$Distance_From_Coast <- ifelse(!is.na(as.numeric(model.data$Distance_From_Coast)),
+                                    model.data$Distance_From_Coast,
+                                    model.default)
+```
+
+```{r position infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("ID", "OD")
+model.default <- "OD"
+
+position.default <- sum(!(model.data$Position %in% model.accepts))
+
+model.data$Position <- ifelse(model.data$Position %in% model.accepts,
+                                    model.data$Position,
+                                    model.default)
+```
+
+```{r duty infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+duty.default <- sum(is.na(as.numeric(model.data$Duty_Factor)))
+
+model.data$Duty_Factor <- ifelse(!is.na(as.numeric(model.data$Duty_Factor)),
+                                    model.data$Duty_Factor,
+                                    model.default)
+```
+
+```{r customers infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+model.data$Number_Of_Customers <- as.numeric(model.data$Number_Of_Customers)
+
+customers.default <- sum(is.na(as.numeric(model.data$Number_Of_Customers)))
+
+# change NA customer values to average across asset base
+model.data$Number_Of_Customers[is.na(model.data$Number_Of_Customers)] <- round(mean(model.data$Number_Of_Customers, na.rm=T))
+
+model.data$Number_Of_Customers <- ifelse(!is.na(as.numeric(model.data$Number_Of_Customers)),
+                                    model.data$Number_Of_Customers,
+                                    model.default)
+```
+
+```{r top 30 infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+top.30.default <- sum(is.na(as.numeric(model.data$Top_30_Customers_Factor)))
+
+model.data$Top_30_Customers_Factor <- ifelse(!is.na(as.numeric(model.data$Top_30_Customers_Factor)),
+                                    model.data$Top_30_Customers_Factor,
+                                    model.default)
+```
+
+```{r type infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+type.default <- sum(is.na(model.data$Type_Factor) | model.data$Type_Factor=="" | model.data$Type_Factor=="Default")
+
+model.data$Type_Factor <- ifelse(model.data$Type_Factor %in% model.accepts,
+                                    model.data$Type_Factor,
+                                    model.default)
+```
+
+```{r access financial infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("A", "B", "C")
+model.default <- "A"
+
+access.financial.default <- sum(!(model.data$Access_Financial_Factor %in% model.accepts))
+
+model.data$Access_Financial_Factor <- ifelse(model.data$Access_Financial_Factor %in% model.accepts,
+                                    model.data$Access_Financial_Factor,
+                                    model.default)
+```
+
+```{r loc safety infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("High", "Medium", "Low")
+model.default <- "Medium"
+
+location.safety.default <- sum(!(model.data$Location_Safety_Factor %in% model.accepts))
+
+model.data$Location_Safety_Factor <- ifelse(model.data$Location_Safety_Factor %in% model.accepts,
+                                    model.data$Location_Safety_Factor,
+                                    model.default)
+```
+
+```{r type safety infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("High", "Medium", "Low")
+model.default <- "Medium"
+
+type.safety.default <- sum(!(model.data$Type_Safety_Factor %in% model.accepts))
+
+model.data$Type_Safety_Factor <- ifelse(model.data$Type_Safety_Factor %in% model.accepts,
+                                    model.data$Type_Safety_Factor,
+                                    model.default)
+```
+
+```{r type env infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("Oil", "SF6", "Neither")
+model.default <- 0.97
+
+type.environmental.default <- sum(!(model.data$Type_Environmental_Factor %in% model.accepts))
+
+# change to factor
+model.data$Type_Environmental_Factor[model.data$Type_Environmental_Factor=="Oil"] <- 0.97
+model.data$Type_Environmental_Factor[model.data$Type_Environmental_Factor=="SF6"] <- 0.06
+model.data$Type_Environmental_Factor[model.data$Type_Environmental_Factor=="Neither"] <- 0.03
+
+model.accepts <- c(0.97, 0.06, 0.03)
+
+model.data$Type_Environmental_Factor <- ifelse(model.data$Type_Environmental_Factor %in% model.accepts,
+                                    model.data$Type_Environmental_Factor,
+                                    model.default)
+```
+
+```{r proximity infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("Very Close to Water Course (<40m)", "Not Close to Water Course (>120m) or No Oil", "Close to Water Course (between 40m and 80m)", "Moderately Close to Water Course (between 80m and 120m)")
+model.default <- "Default"
+
+model.data$Proximity_to_Water_Course[model.data$Proximity_to_Water_Course=="Very Close to Water Course"] <- model.accepts[1]
+model.data$Proximity_to_Water_Course[model.data$Proximity_to_Water_Course=="Not Close to Water Course"] <- model.accepts[2]
+model.data$Proximity_to_Water_Course[model.data$Proximity_to_Water_Course=="Close to Water Course"] <- model.accepts[3]
+model.data$Proximity_to_Water_Course[model.data$Proximity_to_Water_Course=="Moderately Close to Water Course"] <- model.accepts[4]
+
+proximity.default <- sum(!(model.data$Proximity_to_Water_Course %in% model.accepts))
+
+model.data$Proximity_to_Water_Course <- ifelse(model.data$Proximity_to_Water_Course %in% model.accepts,
+                                    model.data$Proximity_to_Water_Course,
+                                    model.default)
+```
+
+```{r bunding infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("Bunded", "Not Bunded")
+model.default <- "Default"
+
+bunding.default <- sum(!(model.data$Bunding_Factor %in% model.accepts))
+
+model.data$Bunding_Factor <- ifelse(model.data$Bunding_Factor %in% model.accepts,
+                                    model.data$Bunding_Factor,
+                                    model.default)
+```
+
+```{r max demand infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- "Default"
+
+# change 0 to NA as 0 is used as a default value
+model.data$Actual_Load[model.data$Actual_Load==0] <- NA
+
+max.demand.default <- sum(is.na(as.numeric(model.data$Actual_Load)))
+
+model.data$Actual_Load <- ifelse(!is.na(as.numeric(model.data$Actual_Load)),
+                                    model.data$Actual_Load,
+                                    model.default)
+```
+
+```{r network infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.accepts <- c("Secure", "Not Secure")
+model.default <- "Secure"
+
+model.data$Network_Type_Factor[model.data$Network_Type_Factor=="Unsecure"] <- "Not Secure"
+
+network.default <- sum(!(model.data$Network_Type_Factor %in% model.accepts))
+
+model.data$Network_Type_Factor <- ifelse(model.data$Network_Type_Factor %in% model.accepts,
+                                    model.data$Network_Type_Factor,
+                                    model.default)
+```
+
+```{r quantity infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+quantity.default <- sum(is.na(as.numeric(model.data$`Quantity Resource`)))
+
+model.data$`Quantity Resource` <- ifelse(!is.na(as.numeric(model.data$`Quantity Resource`)),
+                                    model.data$`Quantity Resource`,
+                                    model.default)
+```
+
+```{r external cond, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+external.cond.default <- sum(is.na(as.numeric(model.data$`External Condition Factor`)) | model.data$`External Condition Factor` == "Default")
+
+model.data$`External Condition Factor` <- ifelse(!is.na(as.numeric(model.data$`External Condition Factor`)),
+                                    model.data$`External Condition Factor`,
+                                    model.default)
+```
+
+```{r oil leaks gas pressure, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+oil.leaks.gas.pressure.default <- sum(is.na(as.numeric(model.data$`Oil Leaks_Gas Pressure Factor`)) | model.data$`Oil Leaks_Gas Pressure Factor` == "Default")
+
+model.data$`Oil Leaks_Gas Pressure Factor` <- ifelse(!is.na(as.numeric(model.data$`Oil Leaks_Gas Pressure Factor`)),
+                                    model.data$`Oil Leaks_Gas Pressure Factor`,
+                                    model.default)
+```
+
+```{r thermo assessment, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+thermo.assessment.default <- sum(is.na(as.numeric(model.data$`Thermographic Assessment Factor`)) | model.data$`Thermographic Assessment Factor` == "Default")
+
+model.data$`Thermographic Assessment Factor` <- ifelse(!is.na(as.numeric(model.data$`Thermographic Assessment Factor`)),
+                                    model.data$`Thermographic Assessment Factor`,
+                                    model.default)
+```
+
+```{r internal cond, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+internal.cond.default <- sum(is.na(as.numeric(model.data$`Internal Condition Factor`)) | model.data$`Internal Condition Factor` == "Default")
+
+model.data$`Internal Condition Factor` <- ifelse(!is.na(as.numeric(model.data$`Internal Condition Factor`)),
+                                    model.data$`Internal Condition Factor`,
+                                    model.default)
+```
+
+```{r indoor env cond, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+indoor.env.cond.default <- sum(is.na(as.numeric(model.data$`Indoor Environment Condition Factor`)) | model.data$`Indoor Environment Condition Factor` == "Default")
+
+model.data$`Indoor Environment Condition Factor` <- ifelse(!is.na(as.numeric(model.data$`Indoor Environment Condition Factor`)),
+                                    model.data$`Indoor Environment Condition Factor`,
+                                    model.default)
+```
+
+```{r support structures cond, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+support.structures.cond.default <- sum(is.na(as.numeric(model.data$`Support Structures Condition Factor`)) | model.data$`Support Structures Condition Factor` == "Default")
+
+model.data$`Support Structures Condition Factor` <- ifelse(!is.na(as.numeric(model.data$`Support Structures Condition Factor`)),
+                                    model.data$`Support Structures Condition Factor`,
+                                    model.default)
+```
+
+```{r pd infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+pd.default <- sum(is.na(model.data$`Partial Discharge Factor`) | model.data$`Partial Discharge Factor` == "Default")
+
+model.data$`Partial Discharge Factor` <- ifelse(!is.na(as.numeric(model.data$`Partial Discharge Factor`)),
+                                            model.data$`Partial Discharge Factor`,
+                                            model.default)
+```
+
+```{r ductor infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+ductor.test.default <- sum(is.na(model.data$`Ductor Test Factor`) | model.data$`Ductor Test Factor` == "Default")
+
+model.data$`Ductor Test Factor` <- ifelse(!is.na(as.numeric(model.data$`Ductor Test Factor`)),
+                                            model.data$`Ductor Test Factor`,
+                                            model.default)
+```
+
+```{r IR test infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+IR.test.default <- sum(is.na(model.data$`IR Test Factor`) | model.data$`IR Test Factor` == "Default")
+
+model.data$`IR Test Factor` <- ifelse(!is.na(as.numeric(model.data$`IR Test Factor`)),
+                                            model.data$`IR Test Factor`,
+                                            model.default)
+```
+
+```{r oil tests gas tests infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+oil.tests.gas.tests.default <- sum(is.na(model.data$`Oil Tests_Gas Tests Factor`) | model.data$`Oil Tests_Gas Tests Factor` == "Default")
+
+model.data$`Oil Tests_Gas Tests Factor` <- ifelse(!is.na(as.numeric(model.data$`Oil Tests_Gas Tests Factor`)),
+                                            model.data$`Oil Tests_Gas Tests Factor`,
+                                            model.default)
+```
+
+```{r temp readings infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+temp.readings.default <- sum(is.na(model.data$`Temperature Readings Factor`) | model.data$`Temperature Readings Factor` == "Default")
+
+model.data$`Temperature Readings Factor` <- ifelse(!is.na(as.numeric(model.data$`Temperature Readings Factor`)),
+                                            model.data$`Temperature Readings Factor`,
+                                            model.default)
+```
+
+```{r trip test infill, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+trip.test.default <- sum(is.na(model.data$`Trip Test Factor`) | model.data$`Trip Test Factor` == "Default")
+
+model.data$`Trip Test Factor` <- ifelse(!is.na(as.numeric(model.data$`Trip Test Factor`)),
+                                            model.data$`Trip Test Factor`,
+                                            model.default)
+```
+
+```{r rel mod, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 1
+
+reliability.modifier.default <- sum(is.na(as.numeric(model.data$`Reliability Modifier`)))
+reliability.modifier.outside.range <- sum(model.data$`Reliability Modifier` < 0.6 | model.data$`Reliability Modifier` > 1.5)
+
+model.data$`Reliability Modifier` <- pmin(pmax(model.data$`Reliability Modifier`, 0.6), 1.5)
+
+model.data$`Reliability Modifier` <- ifelse(!is.na(as.numeric(model.data$`Reliability Modifier`)),
+                                    model.data$`Reliability Modifier`,
+                                    model.default)
+```
+
+```{r rel col, warning=FALSE, echo=FALSE, message = FALSE}
+model.default <- 0.5
+
+reliability.collar.default <- sum(is.na(as.numeric(model.data$`Reliability Collar`)))
+
+model.data$`Reliability Collar` <- ifelse(!is.na(as.numeric(model.data$`Reliability Collar`)),
+                                    model.data$`Reliability Collar`,
+                                    model.default)
+```
+
+## Default Counts
+
+Any fields which are infilled during the process are assessed for default values below. Additionally, `r reliability.modifier.outside.range` assets are outside the required range of 0.6 to 1.5.
+
+```{r summary, warning=FALSE, echo=FALSE, message = FALSE}
+columns.infilled <- unique(names(model.data))[!(unique(names(model.data)) %in% c("Area1", "Type", "Asset_Number","X","Y", "Evonet_Group"))]
+
+infilling.summary <- data.frame(`Model Name` = columns.infilled,
+                                `Asset Count Default` = c(manufacturer.default,
+                                                          relation.default,
+                                                          code.default,
+                                                          health.category.default,
+                                                          asset.category.default,
+                                                          subdivision.default,
+                                                          voltage.default,
+                                                          year.default,
+                                                          coast.default,
+                                                          altitude.default,
+                                                          corrosion.default,
+                                                          distance.default,
+                                                          position.default,
+                                                          duty.default,
+                                                          customers.default,
+                                                          top.30.default,
+                                                          type.default,
+                                                          access.financial.default,
+                                                          location.safety.default,
+                                                          type.safety.default,
+                                                          type.environmental.default,
+                                                          proximity.default,
+                                                          bunding.default,
+                                                          max.demand.default,
+                                                          network.default,
+                                                          quantity.default,
+                                                          external.cond.default,
+                                                          oil.leaks.gas.pressure.default,
+                                                          thermo.assessment.default,
+                                                          internal.cond.default,
+                                                          indoor.env.cond.default,
+                                                          support.structures.cond.default,
+                                                          pd.default,
+                                                          ductor.test.default,
+                                                          IR.test.default,
+                                                          oil.tests.gas.tests.default,
+                                                          temp.readings.default,
+                                                          trip.test.default,
+                                                          reliability.modifier.default,
+                                                          reliability.collar.default), check.names = F)
+
+kable(infilling.summary, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"))
+```
+
+```{r GIS input csv, warning=FALSE, echo=FALSE, message = FALSE, include = FALSE}
+shape.file <- data.table(assets)
+
+shape.file <- shape.file[!is.na(as.numeric(shape.file$X)) & !is.na(as.numeric(shape.file$Y))]
+
+shape.file[, wkt_raw := paste0("POINT (", shape.file$X, " ", shape.file$Y, ")")]
+
+shape.file <- st_as_sf(shape.file, wkt = "wkt_raw")
+
+
+
+# Shape file must be in WGS84 projection for Qlik. EPSG code 4326
+st_crs(shape.file) <- 25832
+st_crs(shape.file)
+
+# Set projection to WGS84
+shape.file <- st_transform(shape.file, crs = 4326)
+
+# Shape file must not have a z dimension to the geometry
+# Remove z dimension
+shape.file <- st_zm(shape.file)
+
+# Use sf function to add new column with WKT (well-known text) geometry
+shape.file.wkt <- shape.file %>%
+  mutate(wkt_transformed = st_as_text(shape.file$wkt_raw))
+
+# Use QlikLineFormat function to convert the WKT to format required by Qlik.
+data.for.qlik <- shape.file.wkt %>%
+  mutate(qlikpoint = QlikLineFormat(wkt_transformed))
+
+# Remove shape file geometry and WKT
+st_geometry(data.for.qlik) <- NULL
+data.for.qlik$wkt_raw <- NULL
+data.for.qlik$wkt_transformed <- NULL
+
+gis.data.for.qlik <- strsplit(data.for.qlik$qlikpoint, ",")
+gis.data.for.qlik.x <- unlist(lapply(gis.data.for.qlik, function(x) gsub("\\[", "", x[1])))
+gis.data.for.qlik.y <- unlist(lapply(gis.data.for.qlik, function(x) gsub("\\]", "", x[2])))
+
+data.for.qlik <- data.table(data.for.qlik)
+
+data.for.qlik <- data.for.qlik[, .(AssetID = Asset_Number,DRFTMRK = DRFTMRK ,X = gis.data.for.qlik.x, Y = gis.data.for.qlik.y)]
+
+# Write csv of data for import to Qlik
+write_csv(data.for.qlik, args[5]) ## this needs to be an extra output from the 
+                                                                                                  ## R script and should be the following:
+                                                                                                  ## Asset_Number, X, Y and Driftsmrk
+
+
+
+
+
+```
+
+
+
+
+```{r export, warning=FALSE, echo=FALSE, message = FALSE}
+
+write_csv(model.data, args[4])
+
+```
