@@ -1,10 +1,20 @@
 *.rhistory
+*.rdata
+
 *.csv
 *.xlsx
 *.pptx
+*.html
+*.png
 
-!/scripts
+# eda files
+*.lncfg
+*.wxmod
+*.wrop
 
+# qlik dash
+*.qvf
 
-!*.r
-!*.rmd
+*.ini
+*.jpg
+*.svg
