@@ -1,20 +1,5 @@
-*.rhistory
-*.rdata
+# exclude everything except directory foo/bar
+/*
+!/scripts
+!/Model/scripts
 
-*.csv
-*.xlsx
-*.pptx
-*.html
-*.png
-
-
-*.lncfg
-*.wxmod
-*.wrop
-
-
-*.qvf
-
-*.ini
-*.jpg
-*.svg
