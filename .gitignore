@@ -7,12 +7,12 @@
 *.html
 *.png
 
-# eda files
+
 *.lncfg
 *.wxmod
 *.wrop
 
-# qlik dash
+
 *.qvf
 
 *.ini
