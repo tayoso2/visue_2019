@@ -1,5 +1,5 @@
 ---
-title: "Evonet 10/15kV Cables Data Analysis"
+title: "Trefor 10kV Cables Data Analysis"
 output:
   html_document:
     number_sections: yes
@@ -24,9 +24,9 @@ if (EDA) {
   args <- commandArgs(trailingOnly = TRUE)
 } else {
   args <- c(getwd(),
-            "./Data/Asset Bases/HV Non-Pressurised Cables (Non-CNAIM) Raw Asset Base v3 0608.csv",
-            "./Output Data/10_15kV Cables Population Summary 0608.csv",
-            "./Output Data/10_15kV Cables for Model v3 0608.csv")
+            "Data/Asset Bases/HV Non-Pressurised Cables_Raw Assets (EDA Version v1) 2207.csv",
+            "Output Data/10_15kV Cables Population Summary 2207.csv",
+            "Output Data/10_15kV Cables for Model 2207.csv")
 }
 
 setwd(args[1])
@@ -37,6 +37,7 @@ setwd(args[1])
 library(tidyverse)
 library(data.table)
 library(ggplot2)
+library(DescTools)
 library(knitr)
 library(kableExtra)
 
@@ -129,7 +130,7 @@ Asset_Number is the unique identifier. There is a total of **`r length(cables.as
 ## Year Of Manufacture
 
 ```{r age, message=FALSE, warning=FALSE, echo=FALSE}
-plot(as.integer(as.numeric(cables.assets$Year_Of_Manufacture)), na.rm = TRUE,
+PlotFdist(as.integer(as.numeric(cables.assets$Year_Of_Manufacture)), na.rm = TRUE,
           main = "Distribution of 10/15kV Cables by Year Of Manufacture")
 ```
 
@@ -220,17 +221,17 @@ assets$`Quantity Resource`<- as.numeric(assets$`Quantity Resource`)
 ```
 
 ```{r model, warning=FALSE, echo=FALSE, message = FALSE}
-raw.model.data <- data.frame(Area1 = "Evonet",
+raw.model.data <- data.frame(Area1 = "Trefor",
                           TYPE = "Cable",
                           Asset_Number = assets$Asset_Number,
                           Site = paste0(assets$From, " - ", assets$To),
-                          Evonet_Group = "10/15kV Cables",
+                          Trefor_Group = "10/15kV Cables",
                           Health_Index_Asset_Category = assets$Health_Index_Asset_Category,
                           Asset_Register_Category = assets$Asset_Register_Category,
                           Voltage = gsub("\\s(.*)", "", assets$Asset_Register_Category),
                           Year_Of_Manufacture = assets$Year_Of_Manufacture,                                                
                           SubDivision = assets$SubDivision,
-                          Evonet_Subdivision = ifelse(grepl("PEX", assets$SubDivision),
+                          Trefor_Subdivision = ifelse(grepl("PEX", assets$SubDivision),
                                                       "PEX", 
                                                       ifelse(grepl("NOT DEFINED", assets$SubDivision),
                                                              "PEX", "APB")),
@@ -251,7 +252,7 @@ raw.model.data <- data.frame(Area1 = "Evonet",
 check.names = F, stringsAsFactors = F)
                           
 table.data <- data.frame(`Model Field Name` = colnames(raw.model.data),
-                         `Data Used` = c("'Evonet' for all assets",
+                         `Data Used` = c("'Trefor' for all assets",
                                          "'Cable' for all assets",
                                          "Asset_Number",
                                          "From - To",
@@ -561,7 +562,7 @@ model.data$`Reliability Collar` <- ifelse(!is.na(as.numeric(model.data$`Reliabil
 Any fields which are infilled during the process are assessed for default values below. Additionally, `r reliability.modifier.outside.range` cables are outside the required range of 0.6 to 1.5.
 
 ```{r summary, warning=FALSE, echo=FALSE, message = FALSE}
-columns.infilled <- unique(names(model.data))[!(unique(names(model.data)) %in% c("Area1", "TYPE", "Evonet_Group", "Asset_Number", "Site", "Evonet_Subdivision"))]
+columns.infilled <- unique(names(model.data))[!(unique(names(model.data)) %in% c("Area1", "TYPE", "Trefor_Group", "Asset_Number", "Site", "Trefor_Subdivision"))]
 
 infilling.summary <- data.frame(`Model Name` = columns.infilled,
                                 `Asset Count Default` = c(health.category.default,

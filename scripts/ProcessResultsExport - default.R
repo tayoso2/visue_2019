@@ -1,5 +1,6 @@
-setwd("C:/Users/TOsosanya/Desktop/Electricity/Danish DNOs/Evonet/Model")
-# Package dependencies
+
+# load libraries
+
 library(data.table)
 library(tidyverse)
 library(stringi)
@@ -161,7 +162,6 @@ MeltSingleMeasure <-
 # Function to convert a set of attributes and measures into long format
 MakeLong <-
   function(result,
-           scenarios = NULL,
            measures = NULL,
            attributes = NULL,
            timesteps = NULL,
@@ -198,13 +198,14 @@ MakeLong <-
     # Reorder columns
     cols.required <- c(attributes, "Measure", "Timestep", "Value")
     x <- x[, cols.required, with = FALSE]
-    x$Scenario <- scenarios
+    
     return(x)
   }
 
 # Function to convert a set of files all at once
 MultipleMakeLong <-
   function(files,
+           scenarios = NULL,
            measures = NULL,
            attributes = NULL,
            timesteps = NULL) {
@@ -239,21 +240,38 @@ MakeSemiLong <- function(result,
 
 ### Examples ###
 
+# Load in a single result
+result.export <-
+  fread("Assets.Trigger.csv", fill = TRUE) # use fill = TRUE to handle unequal length rows (in case not all assets have all measures)
+
+# Estimate number of timesteps in result
+GetTimestepsNumber(result.export)
+
+# Detect attributes in result
+GetAttributeNames(result.export)
+
+# Estimate measures in result
+GetMeasureNames(result.export)
+
+# Convert a single result (loaded as data.frame) to long format. Guess attributes/measures.
+long.result <- MakeLong(result.export)
+
+# Convert a single result from file (not already loaded as data.frame)
+long.result <- MakeLong("Assets.Trigger.csv")
+
 # Convert a single result (manually specify attributes/measures to reduce memory required).
 long.result <- MakeLong(
-  "Assets.csv",
-  scenarios = c("No Proactive Investment"),
-  measures = c("Age", "Intervention Costs", "Future PoF", "Financial Consequence Cost","Safety Consequence Cost", 
-               "Environmental Consequence Cost", "Network Consequence Cost","Monetised Risk Cost", 
-               "Probability of Failure Mode One", "Probability of Failure Mode Two","Probability of Failure Mode Three",
-               "Number of Customer Interruptions", "CML","Health Index", "Criticality Index", "Stepwise NPV"),
-  attributes = c("Asset_Number"),
-  sep = ","
+  result.export,
+  measures = c("Length", "Corrective Cost", "Performance Cost"),
+  attributes = c("LCS", "TrackType", "Line")
 )
-#long.result$scenarios <-  c("No Proactive Investment") # just added
 
+# Convert several files to long in one operation
+long.results <-
+  MultipleMakeLong(
+    c("./Assets.Opt.csv", "./Assets.Trigger.csv"),
+    scenarios = c("Optimisation", "Trigger")
+  )
 
-write.csv(long.result, "../Model/Output Data/long_results.csv", na = "")
-asset.attributes <- fread("Assets.csv")
-asset.attributes <- asset.attributes[, c(1:30)]
-write.csv(asset.attributes, "../Model/Output Data/attributes.csv", na = "")
+semi.long.results <- 
+  MakeSemiLong(long.results)

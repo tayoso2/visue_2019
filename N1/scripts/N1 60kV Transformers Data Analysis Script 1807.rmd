@@ -1,5 +1,5 @@
 ---
-title: "Evonet 60kV Transformers with Tapchangers Data Analysis"
+title: "N1 EHV Transformers with Tapchangers Data Analysis"
 output:
   html_document:
     number_sections: yes
@@ -26,10 +26,10 @@ if (EDA) {
   args <- commandArgs(trailingOnly = TRUE)
 } else {
   args <- c(getwd(),
-            "./Data/Asset Bases/60kV Transformers Raw Assets_v3 v1 0608.csv",
-            "./Output Data/60kV Transformers Population Summary 0608.csv",
-            "./Output Data/60kV Transformers For Model 0608.csv", 
-            "./Output Data/60kV Transformers GIS 0608.csv")
+            "Data/Asset Bases/EHV Transformers_Raw Assets v2 (EDA Version v1 - ORIGINAL) 1807 default_infilled.csv",
+            "Output Data/60kV Transformers Population Summary 1807 default_infilled.csv",
+            "Output Data/60kV Transformers For Model 1807 .csv", 
+            "Output Data/60kV Transformers GIS 1807.csv")
 }
 
 
@@ -189,15 +189,15 @@ ggplot(tx.assets, aes(factor(Tapchanger_Corrosion_Index))) +
 ## Transformer Distance from Coast
 
 ```{r tx dist.from.coast, message=FALSE, warning=FALSE, echo=FALSE}
-PlotFdist(as.numeric(tx.assets$Transformer_Distance_From_Coast), na.rm = TRUE,
-          main = "Distribution of 60kV Transformers by Distance from Coast")
+#PlotFdist(as.numeric(tx.assets$Transformer_Distance_From_Coast), na.rm = TRUE,
+#          main = "Distribution of 60kV Transformers by Distance from Coast")
 ```
 
 ## Tapchanger Distance from Coast
 
 ```{r tc dist.from.coast, message=FALSE, warning=FALSE, echo=FALSE}
-PlotFdist(as.numeric(tx.assets$Tapchanger_Distance_From_Coast), na.rm = TRUE,
-          main = "Distribution of 60kV Tapchangers by Distance from Coast")
+#PlotFdist(as.numeric(tx.assets$Tapchanger_Distance_From_Coast), na.rm = TRUE,
+#          main = "Distribution of 60kV Tapchangers by Distance from Coast")
 ```
 
 ## Indoor/Outdoor
@@ -255,14 +255,14 @@ ggplot(tx.assets, aes(factor(`Tapchanger External Condition Factor`))) +
 ```{r model, warning=FALSE, echo=FALSE, message = FALSE}
 assets <- tx.assets
 
-raw.model.data <- data.table(Area1 = "Evonet",
+raw.model.data <- data.table(Area1 = "N1",
                           Type = "Transformer",
                           Asset_Number = assets$Asset_Number,
                           Manufacturer = assets$Manufacturer,
                           Relation_3 = assets$Relation_3, 
                           Driftsmrk = assets$Code,
                           Code = assets$Code,
-                          Evonet_Group = "60kV Station",
+                          N1_Group = "60kV Station",
                           Health_Index_Asset_Category = assets$Health_Index_Asset_Category,
                           Asset_Register_Category = assets$Asset_Register_Category,
                           SubDivision = ifelse(assets$Transformer_Year_Of_Manufacture <= 1980 & !is.na(assets$Transformer_Year_Of_Manufacture), "Transformer - Pre 1980", ifelse(assets$Transformer_Year_Of_Manufacture > 1980 & !is.na(assets$Transformer_Year_Of_Manufacture), "Transformer - Post 1980", "Default")),
@@ -332,7 +332,7 @@ raw.model.data <- data.table(Area1 = "Evonet",
 check.names = F, stringsAsFactors = F)
                           
 table.data <- data.frame(`Model Field Name` = colnames(raw.model.data),
-                         `Data Used` = c("'Evonet' for all assets",
+                         `Data Used` = c("'N1' for all assets",
                                          "'Transformer' for all assets",
                                          "Asset_Number",
                                          "Manufacturer",
@@ -1220,7 +1220,7 @@ model.data$`Tapchanger Reliability Collar` <- ifelse(!is.na(as.numeric(model.dat
 Any fields which are infilled during the process are assessed for default values below. Additionally, `r tx.reliability.modifier.outside.range` transformers and `r tc.reliability.modifier.outside.range` tapchangers are outside the required range of 0.6 to 1.5.
 
 ```{r summary, warning=FALSE, echo=FALSE, message = FALSE}
-columns.infilled <- unique(names(model.data))[!(unique(names(model.data)) %in% c("Area1", "Type", "Evonet_Group", "Asset_Number", "Driftsmrk","X","Y"))]
+columns.infilled <- unique(names(model.data))[!(unique(names(model.data)) %in% c("Area1", "Type", "N1_Group", "Asset_Number", "Driftsmrk","X","Y"))]
 
 infilling.summary <- data.frame(`Model Name` = columns.infilled,
                                 `Asset Count Default` = c(manufacturer.default,
